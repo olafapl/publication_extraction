@@ -11,10 +11,6 @@ import random
 from typing import Tuple, Dict, List
 
 
-# Path to directory containing HomePub dataset and pretrained GloVe embeddings.
-data_dir = pathlib.Path(__file__).resolve().parent / "data"
-
-
 def clean_line(line: str) -> str:
     line = re.sub(r"\\", "", line)
     line = re.sub(r"\'", "", line)
@@ -22,13 +18,9 @@ def clean_line(line: str) -> str:
     return line.strip().lower()
 
 
-def read_data(debug=False) -> Tuple[np.ndarray, np.ndarray]:
+def read_data(path: pathlib.Path) -> Tuple[np.ndarray, np.ndarray]:
     lines, labels = [], []
-    count = 0
-    for subdir in (data_dir / "homepub-2500").iterdir():
-        count += 1
-        if debug and count >= 300:
-            break
+    for subdir in path.iterdir():
         tag_path = next(subdir.glob("*.tag.json"), None)
         text_path = next(subdir.glob("*.txt"), None)
 
@@ -76,10 +68,10 @@ def split_data(
     return (samples_train, labels_train), (samples_val, labels_val)
 
 
-def read_embeddings() -> Dict[str, np.ndarray]:
+def read_embeddings(path: pathlib.Path) -> Dict[str, np.ndarray]:
     """Read GloVe word embeddings from the data directory and create an embedding index."""
     embedding_index = {}
-    with (data_dir / "glove" / "glove.6B.300d.txt").open() as embedding_file:
+    with path.open() as embedding_file:
         for line in embedding_file:
             word, coefs = line.split(maxsplit=1)
             coefs = np.fromstring(coefs, sep=" ")
@@ -107,7 +99,9 @@ def create_embedding_matrix(
 
 
 if __name__ == "__main__":
-    samples, labels = read_data(debug=True)
+    data_dir = pathlib.Path(__file__).resolve().parent / "data"
+
+    samples, labels = read_data(data_dir / "homepub-2500")
     (samples_train, labels_train), (samples_val, labels_val) = split_data(
         samples, labels
     )
@@ -122,7 +116,7 @@ if __name__ == "__main__":
 
     # Read GloVe embeddings and create embedding matrix.
     embedding_dim = 300
-    embedding_index = read_embeddings()
+    embedding_index = read_embeddings(data_dir / "glove" / "glove.6B.300d.txt")
     embedding_matrix = create_embedding_matrix(
         word_index, embedding_index, num_tokens, embedding_dim
     )
