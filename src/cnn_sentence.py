@@ -15,7 +15,7 @@ def clean_line(line: str) -> str:
     return line.strip().lower()
 
 
-def load_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
+def read_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
     """Read the HomePub dataset.
 
     Args:
@@ -131,10 +131,76 @@ def create_embedding_matrix(
     return embedding_matrix
 
 
+def cnn_sentence(
+    max_len: int,
+    num_tokens: int,
+    embedding_matrix: np.ndarray,
+    embedding_dim: int,
+    filter_sizes=[3, 4, 5],
+    filter_num=100,
+    dropout_rate=0.5,
+    l2_reg=3.0,
+) -> keras.Model:
+    """Build and compile a CNN-Sentence model.
+
+    Args:
+        max_len (int): Max input (line) length.
+        num_tokens (int): Vocabulary size.
+        embedding_matrix (np.ndarray): Word embedding matrix.
+        embedding_dim (int): Word embedding dimensionality.
+        filter_sizes (list, optional): Filter sizes. Defaults to [3, 4, 5].
+        filter_num (int, optional): Number of filters per filter size. Defaults to 100.
+        dropout_rate (float, optional): Dropout rate. Defaults to 0.5.
+        l2_reg (float, optional): L2 regularization penalty.
+
+    Returns:
+        keras.Model: Compiled model.
+    """
+    int_sequences_input = keras.Input(shape=(max_len,), dtype="int64")
+
+    # Embedding layer.
+    x = layers.Embedding(
+        num_tokens,
+        embedding_dim,
+        embeddings_initializer=keras.initializers.Constant(embedding_matrix),
+        trainable=False,
+    )(int_sequences_input)
+
+    # Convolution layers with three filter sizes and L2 regularization.
+    conv_layers = [
+        layers.Conv1D(
+            filter_num,
+            filter_size,
+            activation="relu",
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+        )(x)
+        for filter_size in filter_sizes
+    ]
+    x = layers.concatenate(conv_layers, axis=1)
+
+    # Max-over-time pooling layer.
+    x = layers.GlobalMaxPool1D()(x)
+
+    # Fully connected layer with dropout and softmax output.
+    x = layers.Dense(filter_num, activation="relu")(x)
+    x = layers.Dropout(dropout_rate)(x)
+    x = layers.Dense(2, activation="softmax")(x)
+
+    model = keras.Model(int_sequences_input, x)
+    model.summary()
+    model.compile(
+        loss="sparse_categorical_crossentropy",
+        optimizer="adam",
+        metrics=["accuracy"],
+    )
+
+    return model
+
+
 if __name__ == "__main__":
     data_dir = pathlib.Path(__file__).resolve().parent.parent / "data"
 
-    samples, labels = load_dataset(data_dir / "homepub-2500")
+    samples, labels = read_dataset(data_dir / "homepub-2500")
     (samples_train, labels_train), (samples_val, labels_val) = split_data(
         samples, labels
     )
@@ -154,50 +220,11 @@ if __name__ == "__main__":
         word_index, embedding_index, num_tokens, embedding_dim
     )
 
-    # Build the model.
-    int_sequences_input = keras.Input(shape=(max_len,), dtype="int64")
-
-    # Embedding layer.
-    x = layers.Embedding(
-        num_tokens,
-        embedding_dim,
-        embeddings_initializer=keras.initializers.Constant(embedding_matrix),
-        trainable=False,
-    )(int_sequences_input)
-
-    # Convolution layers with three filter sizes and L2 regularization.
-    filter_sizes = [3, 4, 5]
-    num_filters = 100
-    conv_layers = [
-        layers.Conv1D(
-            num_filters,
-            filter_size,
-            activation="relu",
-            kernel_regularizer=keras.regularizers.l2(3),
-        )(x)
-        for filter_size in filter_sizes
-    ]
-    x = layers.concatenate(conv_layers, axis=1)
-
-    # Max-over-time pooling layer.
-    x = layers.GlobalMaxPool1D()(x)
-
-    # Fully connected layer with dropout and softmax output.
-    x = layers.Dense(num_filters, activation="relu")(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.Dense(2, activation="softmax")(x)
-
-    model = keras.Model(int_sequences_input, x)
-    model.summary()
+    model = cnn_sentence(max_len, num_tokens, embedding_matrix, embedding_dim)
 
     X_train = vectorizer([[s] for s in samples_train]).numpy()
     X_val = vectorizer([[s] for s in samples_val]).numpy()
     y_train = np.array(labels_train)
     y_val = np.array(labels_val)
 
-    model.compile(
-        loss="sparse_categorical_crossentropy",
-        optimizer="adam",
-        metrics=["accuracy"],
-    )
     model.fit(X_train, y_train, batch_size=50, epochs=3, validation_data=(X_val, y_val))

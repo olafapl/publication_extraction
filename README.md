@@ -18,7 +18,7 @@ The `glove.sh` and `homepub.sh` scripts can be used to download these.
 
 ## Training
 
-Run `main.py`.
+Run `src/cnn_sentence.py`.
 
 ## Other Implementations
 
