@@ -1,13 +1,10 @@
-import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
 import numpy as np
 import pathlib
 import json
-import os
 import re
-import random
 from typing import Tuple, Dict, List
 
 
@@ -18,7 +15,16 @@ def clean_line(line: str) -> str:
     return line.strip().lower()
 
 
-def read_data(path: pathlib.Path) -> Tuple[np.ndarray, np.ndarray]:
+def load_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
+    """Read the HomePub dataset.
+
+    Args:
+        path (pathlib.Path): Data path.
+
+    Returns: Tuple[List[str], List[int]]: Tuple (lines, labels), where a 1 label signifies that a
+        line is a publication string. Lines comprising multi-line publication strings are
+        concatenated to single lines.
+    """
     lines, labels = [], []
     for subdir in path.iterdir():
         tag_path = next(subdir.glob("*.tag.json"), None)
@@ -27,7 +33,7 @@ def read_data(path: pathlib.Path) -> Tuple[np.ndarray, np.ndarray]:
         if not tag_path or not text_path:
             continue
 
-        publication_line_nums = []
+        pub_line_nums: List[List[int]] = []
         with tag_path.open() as tag_file:
             json_tag = json.load(tag_file)
 
@@ -39,19 +45,39 @@ def read_data(path: pathlib.Path) -> Tuple[np.ndarray, np.ndarray]:
                 for publication in json_tag["publications"]:
                     line_num = publication.get("line_num")
                     if line_num:
-                        publication_line_nums.extend(line_num)
+                        pub_line_nums.append(line_num)
 
         with text_path.open() as text_file:
+            next_pub_line_num = None
             for i, line in enumerate(text_file.readlines()):
-                lines.append(clean_line(line))
-                labels.append(i + 1 in publication_line_nums)
+                line_num = i + 1
+                cleaned_line = clean_line(line)
 
-    return np.array(lines), np.array(labels).astype("int")
+                if not next_pub_line_num or max(next_pub_line_num) < line_num:
+                    next_pub_line_num = (
+                        pub_line_nums.pop(0) if len(pub_line_nums) else None
+                    )
+
+                if next_pub_line_num and line_num >= min(next_pub_line_num):
+                    # The current line is part of a publication string.
+                    if line_num > min(next_pub_line_num):
+                        # The line is part of a multi-line publication string, but not the first
+                        # line.
+                        lines[-1] = lines[-1] + cleaned_line
+                    else:
+                        # The line is the first (and perhaps only) line of a publication string.
+                        lines.append(cleaned_line)
+                        labels.append(1)
+                else:
+                    lines.append(cleaned_line)
+                    labels.append(0)
+
+    return lines, labels
 
 
 def split_data(
-    samples: np.ndarray, labels: np.ndarray, validation_split=0.2, seed=1337
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+    samples: List, labels: List, validation_split=0.2, seed=1337
+) -> Tuple[Tuple[List, List], Tuple[np.ndarray, np.ndarray]]:
     samples_copy = samples.copy()
     labels_copy = labels.copy()
     np.random.RandomState(seed).shuffle(samples_copy)
@@ -69,7 +95,14 @@ def split_data(
 
 
 def read_embeddings(path: pathlib.Path) -> Dict[str, np.ndarray]:
-    """Read GloVe word embeddings from the data directory and create an embedding index."""
+    """Read pretrained GloVe word embeddings and create an embedding index.
+
+    Args:
+        path (pathlib.Path): Word vector path.
+
+    Returns:
+        Dict[str, np.ndarray]: Word embedding index.
+    """
     embedding_index = {}
     with path.open() as embedding_file:
         for line in embedding_file:
@@ -84,7 +117,7 @@ def create_embedding_matrix(
     embedding_index: Dict[str, np.ndarray],
     num_tokens,
     embedding_dim,
-):
+) -> np.ndarray:
     embedding_matrix = np.zeros([num_tokens, embedding_dim])
     hits, misses = 0, 0
     for word, i in word_index.items():
@@ -99,9 +132,9 @@ def create_embedding_matrix(
 
 
 if __name__ == "__main__":
-    data_dir = pathlib.Path(__file__).resolve().parent / "data"
+    data_dir = pathlib.Path(__file__).resolve().parent.parent / "data"
 
-    samples, labels = read_data(data_dir / "homepub-2500")
+    samples, labels = load_dataset(data_dir / "homepub-2500")
     (samples_train, labels_train), (samples_val, labels_val) = split_data(
         samples, labels
     )
@@ -157,8 +190,8 @@ if __name__ == "__main__":
     model = keras.Model(int_sequences_input, x)
     model.summary()
 
-    X_train = vectorizer(np.array([[s] for s in samples_train])).numpy()
-    X_val = vectorizer(np.array([[s] for s in samples_val])).numpy()
+    X_train = vectorizer([[s] for s in samples_train]).numpy()
+    X_val = vectorizer([[s] for s in samples_val]).numpy()
     y_train = np.array(labels_train)
     y_val = np.array(labels_val)
 
