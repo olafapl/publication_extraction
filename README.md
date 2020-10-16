@@ -9,10 +9,16 @@ trained on the [HomePub dataset](https://people.eng.unimelb.edu.au/zr/data/homep
 article](https://keras.io/examples/nlp/pretrained_word_embeddings/) from the Keras docs was helpful
 for getting started with pre-trained embeddings.
 
+## Prerequisites
+
+- Pre-trained GloVe word embeddings must be located in `data/glove/`.
+- The HomePub dataset must be located in `data/homepub-2500/`.
+
+The `glove.sh` and `homepub.sh` scripts can be used to download these.
+
 ## Training
 
-Run `main.py`. The script assumes that GloVe word embeddings are located in `data/glove/` and that
-the HomePub dataset is located in `data/homepub-2500/`.
+Run `main.py`.
 
 ## Other Implementations
 
