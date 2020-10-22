@@ -9,6 +9,13 @@ trained on the [HomePub dataset](https://people.eng.unimelb.edu.au/zr/data/homep
 article](https://keras.io/examples/nlp/pretrained_word_embeddings/) from the Keras docs was helpful
 for getting started with pre-trained embeddings.
 
+## Differences from Model Described in Paper
+
+- Because the publication string classification problem is a two-class classification problem, the
+  output layer uses sigmoid activation instead of softmax.
+- 300-dimensional GloVe embeddings are used instead of 300-dimensional word2vec embeddings.
+- The Adam optimizer is used instead of Adadelta.
+
 ## Prerequisites
 
 - Pre-trained GloVe word embeddings must be located in `data/glove/`.

@@ -9,10 +9,7 @@ from typing import Tuple, Dict, List
 
 
 def clean_line(line: str) -> str:
-    line = re.sub(r"\\", "", line)
-    line = re.sub(r"\'", "", line)
-    line = re.sub(r"\"", "", line)
-    return line.strip().lower()
+    return re.sub(r"(\\|\'|\")", "", line).strip().lower()
 
 
 def read_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
@@ -184,14 +181,18 @@ def cnn_sentence(
     # Fully connected layer with dropout and softmax output.
     x = layers.Dense(filter_num, activation="relu")(x)
     x = layers.Dropout(dropout_rate)(x)
-    x = layers.Dense(2, activation="softmax")(x)
+    x = layers.Dense(1, activation="sigmoid")(x)
 
     model = keras.Model(int_sequences_input, x)
     model.summary()
     model.compile(
-        loss="sparse_categorical_crossentropy",
+        loss="binary_crossentropy",
         optimizer="adam",
-        metrics=["accuracy"],
+        metrics=[
+            "acc",
+            keras.metrics.Precision(name="prec"),
+            keras.metrics.Recall(name="rec"),
+        ],
     )
 
     return model
