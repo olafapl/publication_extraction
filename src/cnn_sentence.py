@@ -136,7 +136,7 @@ def cnn_sentence(
     filter_sizes=[3, 4, 5],
     filter_num=100,
     dropout_rate=0.5,
-    l2_reg=3.0,
+    l2_constraint=3.0,
 ) -> keras.Model:
     """Build and compile a CNN-Sentence model.
 
@@ -148,7 +148,7 @@ def cnn_sentence(
         filter_sizes (list, optional): Filter sizes. Defaults to [3, 4, 5].
         filter_num (int, optional): Number of filters per filter size. Defaults to 100.
         dropout_rate (float, optional): Dropout rate. Defaults to 0.5.
-        l2_reg (float, optional): L2 regularization penalty.
+        l2_constraint (float, optional): L2 constraint on penultimate layer.
 
     Returns:
         keras.Model: Compiled model.
@@ -163,13 +163,12 @@ def cnn_sentence(
         trainable=False,
     )(int_sequences_input)
 
-    # Convolution layers with three filter sizes and L2 regularization.
+    # Convolution layers with three filter sizes.
     conv_layers = [
         layers.Conv1D(
             filter_num,
             filter_size,
             activation="relu",
-            kernel_regularizer=keras.regularizers.l2(l2_reg),
         )(x)
         for filter_size in filter_sizes
     ]
@@ -178,9 +177,14 @@ def cnn_sentence(
     # Max-over-time pooling layer.
     x = layers.GlobalMaxPool1D()(x)
 
-    # Fully connected layer with dropout and softmax output.
-    x = layers.Dense(filter_num, activation="relu")(x)
+    # Fully connected layer with dropout and L2 constraint.
+    x = layers.Dense(
+        filter_num,
+        activation="relu",
+        kernel_constraint=keras.constraints.MaxNorm(l2_constraint),
+    )(x)
     x = layers.Dropout(dropout_rate)(x)
+
     x = layers.Dense(1, activation="sigmoid")(x)
 
     model = keras.Model(int_sequences_input, x)
