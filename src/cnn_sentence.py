@@ -12,15 +12,14 @@ def clean_line(line: str) -> str:
     return re.sub(r"(\\|\'|\")", "", line).strip().lower()
 
 
-def read_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
+def read_homepub(path: pathlib.Path) -> Tuple[List[str], List[int]]:
     """Read the HomePub dataset.
 
     Args:
         path (pathlib.Path): Data path.
 
     Returns: Tuple[List[str], List[int]]: Tuple (lines, labels), where a 1 label signifies that a
-        line is a publication string. Lines comprising multi-line publication strings are
-        concatenated to single lines.
+        line is (part of) a publication string.
     """
     lines, labels = [], []
     for subdir in path.iterdir():
@@ -30,63 +29,50 @@ def read_dataset(path: pathlib.Path) -> Tuple[List[str], List[int]]:
         if not tag_path or not text_path:
             continue
 
-        pub_line_nums: List[List[int]] = []
+        pub_line_nums = set()
+        pub_lines = set()
         with tag_path.open() as tag_file:
             json_tag = json.load(tag_file)
 
-            # We're interested only in personal homepages
-            if json_tag["is_personal_homepage"] == "F":
-                continue
-
             if json_tag["contain_publication_list"] == "T":
                 for publication in json_tag["publications"]:
-                    line_num = publication.get("line_num")
-                    if line_num:
-                        pub_line_nums.append(line_num)
+                    if (
+                        "start_index_in_file" in publication
+                        or "line_num" in publication
+                        or "length" in publication
+                    ):
+                        pub_line_nums.update(publication.get("line_num", []))
+                        cleaned_lines = [
+                            clean_line(line) for line in publication["text"].split("\n")
+                        ]
+                        pub_lines.update(cleaned_lines)
+                        lines.extend(cleaned_lines)
+                        labels.extend([1] * len(cleaned_lines))
 
         with text_path.open() as text_file:
-            next_pub_line_num = None
             for i, line in enumerate(text_file.readlines()):
-                line_num = i + 1
                 cleaned_line = clean_line(line)
-
-                if not next_pub_line_num or max(next_pub_line_num) < line_num:
-                    next_pub_line_num = (
-                        pub_line_nums.pop(0) if len(pub_line_nums) else None
-                    )
-
-                if next_pub_line_num and line_num >= min(next_pub_line_num):
-                    # The current line is part of a publication string.
-                    if line_num > min(next_pub_line_num):
-                        # The line is part of a multi-line publication string, but not the first
-                        # line.
-                        lines[-1] = lines[-1] + cleaned_line
-                    else:
-                        # The line is the first (and perhaps only) line of a publication string.
-                        lines.append(cleaned_line)
-                        labels.append(1)
-                else:
-                    lines.append(cleaned_line)
-                    labels.append(0)
+                if i + 1 in pub_line_nums or cleaned_line in pub_lines:
+                    continue
+                lines.append(cleaned_line)
+                labels.append(0)
 
     return lines, labels
 
 
 def split_data(
-    samples: List, labels: List, validation_split=0.2, seed=1337
+    samples: List, labels: List, split=0.4, seed=1337
 ) -> Tuple[Tuple[List, List], Tuple[np.ndarray, np.ndarray]]:
     samples_copy = samples.copy()
     labels_copy = labels.copy()
     np.random.RandomState(seed).shuffle(samples_copy)
     np.random.RandomState(seed).shuffle(labels_copy)
 
-    num_validation_samples = int(validation_split * len(samples))
+    num_validation_samples = int(split * len(samples))
     samples_train = samples_copy[:-num_validation_samples]
     samples_val = samples_copy[-num_validation_samples:]
     labels_train = labels_copy[:-num_validation_samples]
     labels_val = labels_copy[-num_validation_samples:]
-
-    print(f"{len(samples_train)} training samples, {len(samples_val)} val samples")
 
     return (samples_train, labels_train), (samples_val, labels_val)
 
@@ -124,7 +110,6 @@ def create_embedding_matrix(
             hits += 1
         else:
             misses += 1
-    print(f"Converted {hits} words ({misses} misses)")
     return embedding_matrix
 
 
@@ -203,11 +188,17 @@ def cnn_sentence(
 
 
 if __name__ == "__main__":
-    data_dir = pathlib.Path(__file__).resolve().parent.parent / "data"
+    parent_dir = pathlib.Path(__file__).resolve().parent.parent
+    data_dir = parent_dir / "data"
 
-    samples, labels = read_dataset(data_dir / "homepub-2500")
-    (samples_train, labels_train), (samples_val, labels_val) = split_data(
+    # Create training, testing, and validation splits. We split the data 60/40 between training and
+    # testing and use 20% of the training data for validation.
+    samples, labels = read_homepub(data_dir / "homepub-2500")
+    (samples_train, labels_train), (samples_test, labels_test) = split_data(
         samples, labels
+    )
+    (samples_train, labels_train), (samples_val, labels_val) = split_data(
+        samples_train, labels_train, split=0.2
     )
 
     # Create word index.
@@ -225,6 +216,7 @@ if __name__ == "__main__":
         word_index, embedding_index, num_tokens, embedding_dim
     )
 
+    # Create and train model.
     model = cnn_sentence(max_len, num_tokens, embedding_matrix, embedding_dim)
 
     X_train = vectorizer([[s] for s in samples_train]).numpy()
@@ -232,4 +224,21 @@ if __name__ == "__main__":
     y_train = np.array(labels_train)
     y_val = np.array(labels_val)
 
-    model.fit(X_train, y_train, batch_size=50, epochs=3, validation_data=(X_val, y_val))
+    model.fit(
+        X_train,
+        y_train,
+        batch_size=50,
+        epochs=30,
+        validation_data=(X_val, y_val),
+        class_weight={0: 1, 1: np.sum(y_train == 0) / np.sum(y_train == 1)},
+        callbacks=[
+            keras.callbacks.EarlyStopping(patience=2, restore_best_weights=True)
+        ],
+    )
+
+    # Create and save end-to-end model.
+    string_input = keras.Input(shape=(1,), dtype="string")
+    x = vectorizer(string_input)
+    x = model(x)
+    end_to_end_model = keras.Model(string_input, x)
+    end_to_end_model.save(parent_dir / "pretrained")

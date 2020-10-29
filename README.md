@@ -25,7 +25,23 @@ The `glove.sh` and `homepub.sh` scripts can be used to download these.
 
 ## Training
 
-Run `src/cnn_sentence.py`.
+Run `src/cnn_sentence.py`. The trained model is saved to `pretrained/`.
+
+## Testing
+
+Run `main.py` in order to apply the pretrained model from `pretrained/` on the test data and
+generate an evalutation report. Example output:
+
+```
+              precision    recall  f1-score   support
+
+           0       1.00      0.99      0.99     83870
+           1       0.82      0.94      0.88      6018
+
+    accuracy                           0.98     89888
+   macro avg       0.91      0.96      0.93     89888
+weighted avg       0.98      0.98      0.98     89888
+```
 
 ## Other Implementations
 
