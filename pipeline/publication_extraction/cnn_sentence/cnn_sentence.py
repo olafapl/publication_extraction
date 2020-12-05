@@ -6,7 +6,7 @@ from typing import List
 from ..publication_extractor import PublicationExtractor
 
 
-class CnnSentence(PublicationExtractor):
+class CNNSentence(PublicationExtractor):
     def __init__(self, model: str):
         """
         Args:

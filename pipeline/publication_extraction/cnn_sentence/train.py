@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
@@ -5,9 +6,11 @@ import numpy as np
 import pathlib
 import json
 import re
+import argparse
 from typing import Tuple, Dict, List
 
-from ..data_util import read_homepub, split_data, data_dir
+from ...data_util import data_dir
+from ...homepub import HomePub
 
 
 def read_embeddings(path: pathlib.Path) -> Dict[str, np.ndarray]:
@@ -105,7 +108,7 @@ def cnn_sentence(
     model.summary()
     model.compile(
         loss="binary_crossentropy",
-        optimizer="adam",
+        optimizer=keras.optimizers.Adam(learning_rate=0.0005),
         metrics=[
             "acc",
             keras.metrics.Precision(name="prec"),
@@ -117,17 +120,39 @@ def cnn_sentence(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train CNN-Sentence on HomePub dataset."
+    )
+    parser.add_argument(
+        "output",
+        type=str,
+        help="output folder for trained model inside the /models directory",
+    )
+    parser.add_argument(
+        "--filter-sizes",
+        type=List[int],
+        help="filter sizes",
+        default=[3, 4, 5],
+    )
+    parser.add_argument(
+        "--filter-num",
+        type=int,
+        help="number of filters",
+        default=100,
+    )
+    parser.add_argument("--dropout", type=float, help="dropout rate", default=0.5)
+    parser.add_argument("--l2", type=float, help="l2 constraint", default=3.0)
+    args = parser.parse_args()
+
     parent_dir = pathlib.Path(__file__).resolve().parent
 
     # Create training, testing, and validation splits. We split the data 60/40 between training and
     # testing and use 20% of the training data for validation.
-    samples, labels = read_homepub()
-    (samples_train, labels_train), (samples_test, labels_test) = split_data(
-        samples, labels
-    )
-    (samples_train, labels_train), (samples_val, labels_val) = split_data(
-        samples_train, labels_train, split=0.2
-    )
+    data = HomePub()
+    samples_train = [sample for page in data.train for sample in page.lines]
+    labels_train = [sample for page in data.train for sample in page.labels]
+    samples_val = [sample for page in data.val for sample in page.lines]
+    labels_val = [sample for page in data.val for sample in page.labels]
 
     # Create word index.
     max_len = 200
@@ -145,7 +170,16 @@ if __name__ == "__main__":
     )
 
     # Create and train model.
-    model = cnn_sentence(max_len, num_tokens, embedding_matrix, embedding_dim)
+    model = cnn_sentence(
+        max_len,
+        num_tokens,
+        embedding_matrix,
+        embedding_dim,
+        filter_sizes=args.filter_sizes,
+        filter_num=args.filter_num,
+        dropout_rate=args.dropout,
+        l2_constraint=args.l2,
+    )
 
     X_train = vectorizer([[s] for s in samples_train]).numpy()
     X_val = vectorizer([[s] for s in samples_val]).numpy()
@@ -169,4 +203,4 @@ if __name__ == "__main__":
     x = vectorizer(string_input)
     x = model(x)
     end_to_end_model = keras.Model(string_input, x)
-    end_to_end_model.save(parent_dir / "models" / "model")
+    end_to_end_model.save(parent_dir / "models" / args.output)
