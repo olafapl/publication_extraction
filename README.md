@@ -14,5 +14,6 @@ The pipeline itself is represented by the `Pipeline` class.
 
 - Some models assume that pre-trained GloVe word embeddings are located in `data/glove/`.
 - Some models assume that the HomePub dataset is located in `data/homepub-2500/`.
+- Some models assume that the UMass Citation Field Extraction Dataset is located in `data/umass/`.
 
-The `glove.sh` and `homepub.sh` scripts can be used to download these.
+The `glove.sh`, `homepub.sh`, and `umass.sh` scripts can be used to download these.
